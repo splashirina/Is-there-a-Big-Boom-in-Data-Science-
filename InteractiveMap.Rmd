@@ -1,0 +1,207 @@
+---
+title: "Interactive Maps"
+author: "Rina(Xiaoru) Lin"
+date: "June 1, 2017"
+output: html_document
+---
+
+
+This is an R Markdown document. Markdown is a simple formatting syntax for authoring HTML, PDF, and MS Word documents. For more details on using R Markdown see <http://rmarkdown.rstudio.com>.
+
+When you click the **Knit** button a document will be generated that includes both content as well as the output of any embedded R code chunks within the document. You can embed an R code chunk like this:
+
+```{r setting working directory}
+if(Sys.info()['sysname'] != "Windows"){
+  setwd("~/Desktop/WhatDataScience")
+} else {
+  setwd("C:/Users/rinlin/Desktop/WhyDataScience")
+}
+```
+
+
+```{r Import Library}
+if(!require(RColorBrewer)){
+  install.packages("RcolorBrewer")
+}
+library(RColorBrewer)
+
+if(!require(plyr)){
+  install.packages("plyr")
+}
+library(plyr)
+
+if(!require(rMaps)){
+  devtools::install_github("ramnathv/rCharts")
+  devtools::install_github("ramnathv/rMaps")
+}
+library(rMaps)
+library(rCharts)
+library(ggplot2)
+library(dplyr)
+library(plotly)
+library(reshape2)
+library(gridExtra)
+```
+
+You can also embed plots, for example:
+```{r Define Custom Function}
+# Custom Function Calculates Average Year Over Year Growth Rate.
+year.over.year <- function(x,average=TRUE) {
+
+  data.ts <- x %>% unlist() %>%
+    ts(start=2003,end=2016,frequency=1) 
+  diffs <- data.ts %>% diff()
+  lags <- data.ts %>% lag()
+  
+  if(average==TRUE){
+    result <- mean(diffs/lags) %>% round(4)
+  } else {
+    result <- append(0.00,diffs/lags %>% round(4))
+  }
+  return(result)
+  
+}
+```
+
+```{r, read in raw data}
+raw.all <- read.csv("all2003_2016.csv",stringsAsFactors = FALSE)
+raw.cm <- read.csv("computer_math2003_2016.csv",stringsAsFactors = FALSE)
+```
+
+
+
+```{r raw data treatment - Growth Rate}
+
+
+raw.all$gr.emp <- raw.all$tot_emp%>%year.over.year(average=FALSE)
+raw.all$gr.salary <- raw.all$a_mean%>%year.over.year(average=FALSE)
+raw.all$category <- "Total"
+
+raw.cm$gr.emp <- raw.cm$tot_emp%>%year.over.year(average=FALSE)
+raw.cm$gr.salary <- raw.cm$a_mean%>%year.over.year(average=FALSE)
+raw.cm$category <- "Data Science"
+
+tot <- rbind(raw.all,raw.cm)
+
+```
+
+
+1997-1998, 2000-2001 are two time period when we see rapid increase in total employment, whereas 2008-2009 notes a consecutive 2 year of decrease - which corresponds to the 2008 financial crisis.
+
+```{r Salary Trend Visualization overall}
+
+
+
+tot %>% ggplot(aes(x=year,y=gr.salary,color=category))+geom_smooth(se=FALSE,method="loess")+theme_minimal()+scale_x_discrete(name="Year",limits=2003:2016)+ylab("Total Employment")+ggtitle("Salary in United States from 2003 to 2016")
+
+```
+
+
+```{r Total Employment Trend Visualization growthrate}
+
+
+tot %>% ggplot(aes(x=year,y=gr.emp,color=category))+geom_smooth(se=FALSE,method="loess")+theme_minimal()+scale_x_discrete(name="Year",limits=2003:2016)+ylab("Total Employment")+ggtitle("Total Employment Growth Rate in United States from 2003 to 2016")
+
+```
+
+
+```{r Choropleth change of total employment from 2003 - 2016}
+#options(rcharts.cdn = TRUE)
+ichoropleth(tot_emp ~ st, data = raw.cm,animate='year',ncuts=9)
+
+```
+
+
+```{r Calculate average year-over-year growth rate - Salary}
+
+
+
+tot.salary<-tot %>%
+       arrange(st,category,year) %>%
+       group_by(st,category) %>%
+       mutate(growth = year.over.year(a_mean_inflation_adjusted,average=FALSE)) %>%
+       group_by(st,category) %>%
+       summarise(growth=mean(growth)) %>%
+       as.data.frame() %>%
+       dcast(st~category,value.var="growth")
+tot.salary$index <- round(tot.salary$`Data Science`/tot.salary$Total,2)
+tot.salary$index.status <- ifelse(tot.salary$index>=1,"overindex","underindex")
+
+
+tot.salary$hover <- with(tot.salary, paste0("index: ",index))
+
+# give state boundaries a white border
+l <- list(color = toRGB("white"), width = 2)
+# specify some map projection/options
+g <- list(
+  scope = 'usa',
+  projection = list(type = 'albers usa'),
+  showlakes = TRUE,
+  lakecolor = toRGB('white')
+)
+
+p <- plot_geo(tot.salary, locationmode = 'USA-states') %>%
+  add_trace(
+    z = ~index, text = ~hover, locations = ~st,
+    color = ~index, colors = 'Purples'
+  ) %>%
+  colorbar(title = "Persons") %>%
+  layout(
+    title = '2016 Number of employement in data science(hover down for avg.yoy Growth Rate)',
+    geo = g
+  )
+
+p
+
+# Create a shareable link to your chart
+# Set up API credentials: https://plot.ly/r/getting-started
+#chart_link = plotly_POST(p, filename="choropleth/ag")
+#chart_link
+```
+
+```{r Calculate average year-over-year Employment growth rate}
+
+
+
+tot.employ<-tot %>%
+       arrange(st,category,year) %>%
+       group_by(st,category) %>%
+       mutate(growth = year.over.year(tot_emp,average=FALSE)) %>%
+       group_by(st,category) %>%
+       summarise(growth=mean(growth)) %>%
+       as.data.frame() %>%
+       dcast(st~category,value.var="growth")
+tot.employ$index <- round(tot.employ$`Data Science`/tot.employ$Total,2)
+tot.employ$index.status <- ifelse(tot.employ$index>=1,"overindex","underindex")
+
+
+tot.employ$hover <- with(tot.employ, paste0("index: ",index))
+
+# give state boundaries a white border
+l <- list(color = toRGB("white"), width = 2)
+# specify some map projection/options
+g <- list(
+  scope = 'usa',
+  projection = list(type = 'albers usa'),
+  showlakes = TRUE,
+  lakecolor = toRGB('white')
+)
+
+p <- plot_geo(tot.employ, locationmode = 'USA-states') %>%
+  add_trace(
+    z = ~index, text = ~hover, locations = ~st,
+    color = ~index, colors = 'Purples'
+  ) %>%
+  colorbar(title = "Persons") %>%
+  layout(
+    title = '2016 Number of employement in data science(hover down for avg.yoy Growth Rate)',
+    geo = g
+  )
+
+p
+
+# Create a shareable link to your chart
+# Set up API credentials: https://plot.ly/r/getting-started
+#chart_link = plotly_POST(p, filename="choropleth/ag")
+#chart_link
+```
